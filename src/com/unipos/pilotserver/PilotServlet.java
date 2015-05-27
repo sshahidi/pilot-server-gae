@@ -18,6 +18,7 @@ import javax.servlet.http.HttpServletResponse;
 import org.json.JSONObject;
 
 import com.google.appengine.api.utils.SystemProperty;
+import com.unipos.pilotserver.PhoneServer.JsonKeys;
 import com.unipos.pilotserver.PhoneServer.ResponseType;
 
 @SuppressWarnings("serial")
@@ -137,7 +138,7 @@ public class PilotServlet extends HttpServlet {
 			
 			String API_KEY= req.getParameter("api_key");
 			//Makhafanim
-			if(API_KEY==null || !API_KEY.equalsIgnoreCase("5ab9535ff010efcabb636b5dd6103fadb2bed9eb"))
+			if(API_KEY==null || !API_KEY.equalsIgnoreCase("5ab9535ff010efcabb636b5dd6103fadb2bed9eb") || !autheticateUesr(req))
 			{
 				resp.setStatus(HttpServletResponse.SC_FORBIDDEN);
 				resp.getWriter().println("Access forbiden.");
@@ -157,4 +158,19 @@ public class PilotServlet extends HttpServlet {
 		}
 		
 	}
+	
+	
+	boolean autheticateUesr(HttpServletRequest req)
+	{
+		String user_name=req.getParameter(JsonKeys.user_name.toString());
+		String user_id=req.getParameter(JsonKeys.user_id.toString());
+		
+		if(user_name==null || user_id==null)
+		{
+			return false;
+		}
+		//TODO: check if user_name and id match with db.
+		return true;
+	}
+	
 }

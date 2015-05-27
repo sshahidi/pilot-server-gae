@@ -73,7 +73,9 @@ public class PhoneServer {
 	private BufferedReader reader;
 	private PrintWriter writer;
 	private Logger logger;
-
+	private long user_id;
+	
+	
 	////Constructors
 	public PhoneServer(HttpServletRequest req, HttpServletResponse resp) throws Exception
 	{
@@ -93,15 +95,18 @@ public class PhoneServer {
 		//writeline("HELLO WELOCME to Pilot Server. Service type: PHONE_SERVER");
 		try
 		{
-			//TODO: we need authetication first. otherewise anyone without loggin can work with sever.
-			String str= readAll();//readline();
-			//JSONParser jparser= new JSONParser();
-			JSONObject json= new JSONObject(str); //(JSONObject) jparser.parse(str); //
-			logger.log(Level.INFO,"whole json object: " + json.toString());
 			//logger.log(Level.INFO,"log level: info" );
 			//logger.log(Level.SEVERE,"log level: severe" );
 			//logger.log(Level.WARNING,"log level: warning" );
+			//TODO: we need authetication first. otherewise anyone without loggin can work with sever.
 			
+			String str= readAll();//readline();
+			//JSONParser jparser= new JSONParser();
+			user_id=Long.parseLong(req.getParameter(JsonKeys.user_id.toString()));
+			JSONObject json= new JSONObject(str); //(JSONObject) jparser.parse(str); //
+			json.put(JsonKeys.creator_id.toString(), user_id+""); //creator is the user!
+			logger.log(Level.INFO,"whole json object: " + json.toString());
+
 			//Type Local MAC Address(String)		Name (String)	AP_Numbers(int)	Latitude(float)	Longitude(float)	Floor_Number(int)	MAC1(String)	RSS1(int)	SSID1 (String:32-bytes)	Frequency1 (int)	Capabilites1 (String:32-bytes)
 			CommandType command_type= CommandType.valueOf( (String) json.get(JsonKeys.command_type.toString()));
 			JSONObject jresponse=new JSONObject();
@@ -179,10 +184,7 @@ public class PhoneServer {
 		/*
 		 * Type-1	Local MAC Address(String)		Name (String)	AP_Numbers(int)	Latitude(float)	Longitude(float)	Floor_Number(int)	MAC1(String)	RSS1(int)	SSID1 (String:32-bytes)	Frequency1 (int)	Capabilites1 (String:32-bytes)	...
 		 */
-		long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
-		String user_name=json.has(JsonKeys.user_name.toString() ) ? (String) json.get(JsonKeys.user_name.toString()):"";
-		long id=json.has(JsonKeys.user_id.toString()) ? Long.parseLong((String) json.get(JsonKeys.user_id.toString())):0;
-		//TODO: we should make sure username and user id belong to the same person and belong to the same person who has logged in.
+		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
 
 		//for now, if the location is not known, we can't add the RP.
 		if(!json.has(JsonKeys.latitude.toString()) || !json.has(JsonKeys.longitude.toString()) )
@@ -340,10 +342,7 @@ public class PhoneServer {
 	{
 		logger.log(Level.INFO,"Update reference point entry...");
 		JSONObject jresponse=new JSONObject();
-		long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
-		String user_name=json.has(JsonKeys.user_name.toString() ) ? (String) json.get(JsonKeys.user_name.toString()):"";
-		long id=json.has(JsonKeys.user_id.toString()) ? Long.parseLong((String) json.get(JsonKeys.user_id.toString())):0;
-		//TODO: we should make sure username and user id belong to the same person and belong to the same person who has logged in.
+		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
 
 		//for now, if the location is not known, we can't add the RP.
 		if(!json.has(JsonKeys.rp_id.toString()  ))
@@ -456,10 +455,7 @@ public class PhoneServer {
 	{
 		logger.log(Level.INFO,"Localize entry...");
 		JSONObject jresponse=new JSONObject();		
-		long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
-		String user_name=json.has(JsonKeys.user_name.toString() ) ? (String) json.get(JsonKeys.user_name.toString()):"";
-		long id=json.has(JsonKeys.user_id.toString()) ? Long.parseLong((String) json.get(JsonKeys.user_id.toString())):0;
-		//TODO: we should make sure username and user id belong to the same person and belong to the same person who has logged in.
+		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
 		
 		//connecting to db if necessary
 		final int trials=3; //number of trials for connecting to db.
@@ -491,11 +487,23 @@ public class PhoneServer {
 			macs+= mac+(i < aps.length()-1? ", ":"");
 		}
 		
-		String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, aprp.rp_id, COUNT(MAC) AS NumberOfAPs"+ 
+		//Old method without tie breaker.
+		/*String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, aprp.rp_id, COUNT(MAC) AS NumberOfAPs"+ 
                      " FROM (aprp INNER JOIN rps ON aprp.rp_id = rps.rp_id)"+
                      " WHERE MAC IN ("+ macs+" )"+
                      " GROUP BY rp_id"+
                      " ORDER BY NumberOfAPs DESC";
+        */
+		//new method with tie breaker
+		String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, aprp.rp_id, "+
+	                     " SUM(IF(MAC IN ("+macs+"), 1, 0)) AS NumberOfAPs, "+
+	                     "  count(MAC) AS TotalAPs "+
+	                     " FROM (aprp INNER JOIN rps ON aprp.rp_id = rps.rp_id) "+
+	                     " GROUP BY rp_id"+
+	                     " ORDER BY NumberOfAPs DESC, TotalAPs ASC"+
+	                     " LIMIT 5";
+		
+		
 		ResultSet rs=query(query_str);
 		if(rs==null)
 		{

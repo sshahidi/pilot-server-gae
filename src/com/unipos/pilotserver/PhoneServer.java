@@ -587,22 +587,58 @@ public class PhoneServer {
 			return jresponse;
 		}
 		
+		//checking if any result exists!
+		
 		//Doing 1NN now! just returning the point with the most number of common APs.
-		//while(rs.next())
-		//{
-		rs.next();
+		if(rs.next()==false) //checking if any result exists! ALSO loading the first result.
+		{
+			jresponse.put(JsonKeys.response_type.toString(), ResponseType.error.toString());
+			jresponse.put(JsonKeys.error_code.toString(), ErrorCode.no_Common_ap_found);
+			logger.log(Level.INFO,"no common aps found for localization.");
+			return jresponse;
+		}
 		double lat =rs.getDouble("latitude");
 		double lon = rs.getDouble("longitude");
 		short floor = rs.getShort("floor_number");
 		long rp_id= rs.getLong("RP_id");
 		String building_id= rs.getString("building_id");
+		
+		
+		long best_score=rs.getLong("TotalAPs"); //Tie breaker: minimum total aps is the winnger.
+		long max_ap=rs.getLong("NumberOfAPs"); //it should be among the points that have max or (max-1) common aps.
+		
+		if(max_ap==0) //checking if any result exists!
+		{
+			jresponse.put(JsonKeys.response_type.toString(), ResponseType.error.toString());
+			jresponse.put(JsonKeys.error_code.toString(), ErrorCode.no_Common_ap_found);
+			logger.log(Level.INFO,"no common aps found for localization.");
+			return jresponse;
+		}
+		
+		while(rs.next())
+		{
+			long num_aps=rs.getLong("NumberOfAPs");
+			long score_aps=rs.getLong("TotalAPs");
+			if(num_aps>=max_ap-1 && score_aps<best_score)
+			{
+				best_score=score_aps;
+				lat =rs.getDouble("latitude");
+				lon = rs.getDouble("longitude");
+				floor = rs.getShort("floor_number");
+				rp_id= rs.getLong("RP_id");
+				building_id= rs.getString("building_id");
+			}
+		}
+		
+		
 		jresponse.put(JsonKeys.response_type.toString(), ResponseType.location.toString());
 		jresponse.put(JsonKeys.latitude.toString(), lat+"");
 		jresponse.put(JsonKeys.longitude.toString(), lon+"");
 		jresponse.put(JsonKeys.floor_number.toString(), floor+"");
 		jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
 		jresponse.put(JsonKeys.building_id.toString(), building_id);
-		//}
+		//jresponse.put("common_ap_count", max_ap);
+		
 		//log.d("returning statement: "+jresponse.toJSONString());
 		return jresponse;
 	}

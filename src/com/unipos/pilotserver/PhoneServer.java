@@ -119,8 +119,9 @@ public class PhoneServer {
 			case add_auto_rp:
 				jresponse=addRereferencePoint(json); //currently, this case is the same as the one above.
 				break;
-				//			case Remove_RP:
-				//				break;
+			case remove_rp:
+				jresponse=removeRP(json);
+				break;
 			case localize:
 				jresponse=localize(json);
 				break;
@@ -150,6 +151,8 @@ public class PhoneServer {
 				jresponse.put(JsonKeys.message.toString(), (String)("Unsupported request code received: "+command_type.toString()));
 				writeline(jresponse.toString(2));
 			}
+			
+			logger.log(Level.INFO, "processing done. Sending the result to client.");
 			if(!str.equalsIgnoreCase("quit"))
 				writeline(jresponse.toString(2));
 			//else
@@ -171,12 +174,75 @@ public class PhoneServer {
 	/* **********Handling requrests ********* */
 
 	/**
+	 * removes a reference point, with given rp_id and all of its wifi-scans
+	 * @param json
+	 */
+	private JSONObject removeRP(JSONObject json) throws SQLException
+	{
+		
+		logger.log(Level.INFO,"Remove RP entry...");
+		JSONObject jresponse=new JSONObject();		
+		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
+		
+		//connecting to db if necessary
+		final int trials=3; //number of trials for connecting to db.
+		for(int i=0;i<trials;i++)
+		{
+			if(db_conn ==null || db_conn.isClosed())
+				connectDb();
+			else
+				break;
+		}
+		if(db_conn==null) //after trying it is still not connected
+			throw new SQLException("Could not connect to db after "+trials+" trials");
+		
+		if(!json.has(JsonKeys.rp_id.toString()) )
+		{
+			jresponse.put(JsonKeys.response_type.toString(), ResponseType.error.toString());
+			jresponse.put(JsonKeys.error_code.toString(), ErrorCode.insufficient_arguments.toString());
+			jresponse.put(JsonKeys.message.toString(), "the rp_id was not given or was not valid.");
+			return jresponse;
+		}
+		long rp_id= Long.parseLong((String)json.get(JsonKeys.rp_id.toString()));
+
+		
+		try
+		{
+
+			String query_str1= "DELETE FROM rps WHERE rp_id= ?"; 
+			String query_str2= "DELETE FROM aprp WHERE rp_id= ?";
+
+			PreparedStatement preparedStmt = db_conn.prepareStatement(query_str1);
+			preparedStmt.setLong(1, rp_id);
+			preparedStmt.execute();
+
+			preparedStmt = db_conn.prepareStatement(query_str2);
+			preparedStmt.setLong(1, rp_id);
+			preparedStmt.execute();
+
+			jresponse.put(JsonKeys.response_type.toString(), ResponseType.rp_removed.toString());
+			jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
+
+		}
+		catch(SQLException e)
+		{
+			jresponse.put(JsonKeys.response_type.toString(), ResponseType.error.toString());
+			jresponse.put(JsonKeys.error_code.toString(), ErrorCode.db_error.toString());
+			jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
+			jresponse.put(JsonKeys.message.toString(), e.getMessage());
+		}
+		//}
+		//log.d("returning statement: "+jresponse.toJSONString());
+		return jresponse;
+	}
+
+
+	/**
 	 * Adds a reference point by first making sure no already registered RP within 1 meters of this RP exists in DB.
 	 * If an RP already exists, it is updated.
 	 * If an RP doesn;t exist, it will be created.
 	 * @param json The json object received containing the contents 
 	 */
-	@SuppressWarnings("unchecked")
 	private JSONObject addRereferencePoint(JSONObject json) throws IOException,SQLException
 	{
 		logger.log(Level.INFO,"Add reference point entry...");
@@ -282,7 +348,7 @@ public class PhoneServer {
 			jresponse.put(JsonKeys.response_type.toString(), ResponseType.manual_rp_added.toString());
 			jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
 
-
+			logger.log(Level.INFO, "RP processed. processing wifi scans.");
 			//creating a new point in the DB.
 			//int ap_numbers = (Integer)json.get("ap_numbers");
 			JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
@@ -291,6 +357,7 @@ public class PhoneServer {
 			PreparedStatement preparedStmt_aps = db_conn.prepareStatement(sql_query1);
 			PreparedStatement preparedStmt_aprps = db_conn.prepareStatement(sql_query2);
 			//fetching the aps and their info
+			db_conn.setAutoCommit(false);
 			for(int i=0;i<aps.length(); i++)
 			{
 				JSONObject obj= (JSONObject) aps.get(i);
@@ -324,8 +391,10 @@ public class PhoneServer {
 				preparedStmt_aprps.addBatch();
 			}
 			int[] res=preparedStmt_aps.executeBatch();
+			db_conn.commit();
 			//log.d("insertion to aps result: "+Arrays.toString(res));
 			preparedStmt_aprps.executeBatch();
+			db_conn.commit();
 			//log.d("insertion to aprp result: "+ Arrays.toString(res));
 			return jresponse;
 		}
@@ -337,7 +406,6 @@ public class PhoneServer {
 	 *  The modifier_id will be changed during this process.
 	 * @param json
 	 */
-	@SuppressWarnings("unchecked")
 	private JSONObject updateReferencePoint(JSONObject json) throws IOException,SQLException
 	{
 		logger.log(Level.INFO,"Update reference point entry...");
@@ -360,6 +428,7 @@ public class PhoneServer {
 		short floor=json.has(JsonKeys.floor_number.toString())? Short.parseShort((String) json.get(JsonKeys.floor_number.toString())):0; //default value is 0
 		double accuracy= json.has(JsonKeys.accuracy.toString())?  Double.parseDouble((String) json.get(JsonKeys.accuracy.toString())):Double.NaN; //default value is NaN
 
+		
 		// UPDATE rps  SET name='test2',rp_type=1,latitude=11,longitude=12,accuracy=10,floor_number=null,creator_id=2,date_modified=CURRENT_TIMESTAMP,floor_id=2 WHERE rp_id=1;
 		JsonKeys[] args=new JsonKeys[] {JsonKeys.rp_name,JsonKeys.rp_type,JsonKeys.latitude,JsonKeys.longitude,JsonKeys.accuracy,JsonKeys.floor_number,JsonKeys.creator_id,JsonKeys.date_modified,JsonKeys.building_id};//"visit_count","no_aps"};
 		String query_begin ="UPDATE rps SET ";//name, rp_type,latitude, longitude, accuracy, floor_number, creator_id,date_modified,visit_count,no_aps)"
@@ -402,6 +471,7 @@ public class PhoneServer {
 		jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
 
 
+		logger.log(Level.INFO, " updated RP. processing wifi scans.");
 		//creating a new point in the DB.
 		//int ap_numbers = (Integer)json.get("ap_numbers");
 		JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
@@ -410,6 +480,7 @@ public class PhoneServer {
 		PreparedStatement preparedStmt_aps = db_conn.prepareStatement(sql_query1);
 		PreparedStatement preparedStmt_aprps = db_conn.prepareStatement(sql_query2);
 		//fetching the aps and their info
+		db_conn.setAutoCommit(false);
 		for(int i=0;i<aps.length(); i++)
 		{
 			JSONObject obj= (JSONObject) aps.get(i);
@@ -443,8 +514,10 @@ public class PhoneServer {
 			preparedStmt_aprps.addBatch();
 		}
 		int[] res=preparedStmt_aps.executeBatch();
+		db_conn.commit();
 		//log.d("insertion to aps result: "+Arrays.toString(res));
 		preparedStmt_aprps.executeBatch();
+		db_conn.commit();
 		//log.d("insertion to aprp result: "+ Arrays.toString(res));
 		return jresponse;
 
@@ -539,6 +612,7 @@ public class PhoneServer {
 
 	private Connection connectDb()
 	{
+		logger.log(Level.INFO, "connecting to db.");
 		String url = null;
 		try
 		{
@@ -558,7 +632,8 @@ public class PhoneServer {
 			}
 			
 			db_conn = DriverManager.getConnection(url,"shervin","123456");
-			ResultSet rs = db_conn.createStatement().executeQuery("use loc_db"); 
+			ResultSet rs = db_conn.createStatement().executeQuery("use loc_db");
+			logger.log(Level.INFO, "connected to db.");
 			return db_conn;
 		}
 		catch(ClassNotFoundException | SQLException e)
@@ -620,7 +695,7 @@ public class PhoneServer {
 	 */
 	private ResultSet manipulate(String query_str,ArrayList<JsonKeysTypes> column_types, ArrayList<Object> values)
 	{
-		logger.log(Level.INFO,"calling a prepared statement. qurey_str: "+query_str);
+		//logger.log(Level.INFO,"calling a prepared statement. qurey_str: "+query_str);
 		try
 		{
 			//" INSERT INTO log (echo_time, text,id)" + " values (?, ?, ?)";
@@ -694,7 +769,7 @@ public class PhoneServer {
 		StringBuilder sb = new StringBuilder();
 
 		BufferedReader reader = req.getReader();
-		reader.mark(10000);
+		//reader.mark(10000);
 
 		String line="";
 		while (true)
@@ -704,7 +779,7 @@ public class PhoneServer {
 				break;
 			sb.append(line).append("\n");
 		} 
-		reader.reset();
+		//reader.reset();
 		return sb.toString();
 
 	}

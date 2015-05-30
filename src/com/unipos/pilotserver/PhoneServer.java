@@ -9,6 +9,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -27,7 +28,7 @@ public class PhoneServer {
 
 	public enum JsonKeys{
 		/* aps */mac(00),ssid(01),frequency(02),capabilities(11),date_created(21),date_modified(31),visit_count(10),last_visit(41),
-		/* rps */rp_id(20),rp_name(51),rp_type(61),latitude(05),longitude(15),altitude(25),accuracy(35),floor_number(03),creator_id(30),building_id(251),
+		/* rps */rp_id(20),rp_name(51),rp_type(61),latitude(05),longitude(15),altitude(25),accuracy(35),floor_number(03),creator_id(30),building_id(251),ap_count(13),
 		/* aprp */rss(04),
 		/* events */ event_id(50),start_date(71),end_date(81),start_time(91),end_time(101),event_title(111),short_info(121),long_info(131),media_id(06),
 		/* users */ user_id(60),user_name(141),passwd(151),email(161),first_name(171),last_name(181),birth_date(191),
@@ -74,7 +75,7 @@ public class PhoneServer {
 	private PrintWriter writer;
 	private Logger logger;
 	private long user_id;
-	
+	private final int trials=3; //number of trials for DB operations.
 	
 	////Constructors
 	public PhoneServer(HttpServletRequest req, HttpServletResponse resp) throws Exception
@@ -88,16 +89,13 @@ public class PhoneServer {
 
 
 	///////////////Public methods:
-
-	@SuppressWarnings("unchecked")
 	public void start() throws Exception
 	{
-		//writeline("HELLO WELOCME to Pilot Server. Service type: PHONE_SERVER");
 		try
 		{
 			//logger.log(Level.INFO,"log level: info" );
-			//logger.log(Level.SEVERE,"log level: severe" );
 			//logger.log(Level.WARNING,"log level: warning" );
+			//logger.log(Level.SEVERE,"log level: severe" );
 			//TODO: we need authetication first. otherewise anyone without loggin can work with sever.
 			
 			String str= readAll();//readline();
@@ -107,7 +105,19 @@ public class PhoneServer {
 			json.put(JsonKeys.creator_id.toString(), user_id+""); //creator is the user!
 			logger.log(Level.INFO,"whole json object: " + json.toString());
 
-			//Type Local MAC Address(String)		Name (String)	AP_Numbers(int)	Latitude(float)	Longitude(float)	Floor_Number(int)	MAC1(String)	RSS1(int)	SSID1 (String:32-bytes)	Frequency1 (int)	Capabilites1 (String:32-bytes)
+			
+			//connecting to db if necessary
+			for(int i=0;i<trials;i++)
+			{
+				if(db_conn ==null || db_conn.isClosed())
+					connectDb();
+				else
+					break;
+			}
+			if(db_conn==null) //after trying it is still not connected
+				throw new SQLException("Could not connect to db after "+trials+" trials");
+			
+			//giving service based on command type
 			CommandType command_type= CommandType.valueOf( (String) json.get(JsonKeys.command_type.toString()));
 			JSONObject jresponse=new JSONObject();
 			switch(command_type)
@@ -182,19 +192,8 @@ public class PhoneServer {
 		
 		logger.log(Level.INFO,"Remove RP entry...");
 		JSONObject jresponse=new JSONObject();		
-		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
 		
-		//connecting to db if necessary
-		final int trials=3; //number of trials for connecting to db.
-		for(int i=0;i<trials;i++)
-		{
-			if(db_conn ==null || db_conn.isClosed())
-				connectDb();
-			else
-				break;
-		}
-		if(db_conn==null) //after trying it is still not connected
-			throw new SQLException("Could not connect to db after "+trials+" trials");
+		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
 		
 		if(!json.has(JsonKeys.rp_id.toString()) )
 		{
@@ -233,6 +232,8 @@ public class PhoneServer {
 		}
 		//}
 		//log.d("returning statement: "+jresponse.toJSONString());
+		 
+		 
 		return jresponse;
 	}
 
@@ -247,9 +248,6 @@ public class PhoneServer {
 	{
 		logger.log(Level.INFO,"Add reference point entry...");
 		JSONObject jresponse=new JSONObject();
-		/*
-		 * Type-1	Local MAC Address(String)		Name (String)	AP_Numbers(int)	Latitude(float)	Longitude(float)	Floor_Number(int)	MAC1(String)	RSS1(int)	SSID1 (String:32-bytes)	Frequency1 (int)	Capabilites1 (String:32-bytes)	...
-		 */
 		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
 
 		//for now, if the location is not known, we can't add the RP.
@@ -269,18 +267,6 @@ public class PhoneServer {
 
 
 		//checking with DB if we should update or we should create.
-
-		//connecting to db if necessary
-		final int trials=3; //number of trials for connecting to db.
-		for(int i=0;i<trials;i++)
-		{
-			if(db_conn ==null || db_conn.isClosed())
-				connectDb();
-			else
-				break;
-		}
-		if(db_conn==null) //after trying it is still not connected
-			throw new SQLException("Could not connect to db after "+trials+" trials");
 
 		//SELECT * FROM rps WHERE floor_number = floor AND latitude BETWEEN (lat-1meter,lat+1meter) AND longitude BETWEEN (lon-1,lon+1)
 		ResultSet rs=null;
@@ -318,8 +304,12 @@ public class PhoneServer {
 		}
 		else //the point did not exist before. its a create.
 		{
+			//counting the number of APs in the new rp. to keep a record of it in the db.
+			JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
+			json.put(JsonKeys.ap_count.toString(), aps.length()+""); //manually adding the ap_count here! next part will extract it again!
+			
 			//SELECT * FROM rps WHERE floor_number = floor AND latitude BETWEEN (lat-1meter,lat+1meter) AND longitude BETWEEN (lon-1,lon+1)
-			JsonKeys[] args=new JsonKeys[] {JsonKeys.rp_name,JsonKeys.rp_type,JsonKeys.latitude,JsonKeys.longitude,JsonKeys.accuracy,JsonKeys.floor_number,JsonKeys.creator_id,JsonKeys.date_modified,JsonKeys.building_id};//"visit_count","no_aps"};
+			JsonKeys[] args=new JsonKeys[] {JsonKeys.rp_name,JsonKeys.rp_type,JsonKeys.latitude,JsonKeys.longitude,JsonKeys.accuracy,JsonKeys.floor_number,JsonKeys.creator_id,JsonKeys.date_modified,JsonKeys.building_id,JsonKeys.ap_count};//"visit_count","no_aps"};
 			String query_begin ="INSERT INTO rps (";//name, rp_type,latitude, longitude, accuracy, floor_number, creator_id,date_modified,visit_count,no_aps)"
 			String query_end =  " values ( "; //?, ?, ?,?,?,?,?,?,?,?)";
 			ArrayList<Object> values=new ArrayList<>();
@@ -348,10 +338,10 @@ public class PhoneServer {
 			jresponse.put(JsonKeys.response_type.toString(), ResponseType.manual_rp_added.toString());
 			jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
 
-			logger.log(Level.INFO, "RP processed. processing wifi scans.");
+			logger.log(Level.INFO, "RP processed."+aps.length() +" APs added. processing wifi scans.");
 			//creating a new point in the DB.
 			//int ap_numbers = (Integer)json.get("ap_numbers");
-			JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
+			//JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
 			String sql_query1="INSERT INTO aps (MAC,ssid,frequency,capabilities,date_modified) VALUES(?,?,?,?, CURRENT_TIMESTAMP)ON DUPLICATE KEY UPDATE ssid=?, frequency = ?, capabilities = ?, date_modified= CURRENT_TIMESTAMP";
 			String sql_query2=" INSERT INTO aprp (RP_id,MAC,rss,date_modified) VALUES(?,?,?, CURRENT_TIMESTAMP ) ON DUPLICATE KEY UPDATE rss= ?";
 			PreparedStatement preparedStmt_aps = db_conn.prepareStatement(sql_query1);
@@ -392,10 +382,11 @@ public class PhoneServer {
 			}
 			int[] res=preparedStmt_aps.executeBatch();
 			db_conn.commit();
-			//log.d("insertion to aps result: "+Arrays.toString(res));
+			logger.log(Level.FINER,"insertion to aps result: "+Arrays.toString(res));
+			logger.log(Level.INFO, "aps updated.");
 			preparedStmt_aprps.executeBatch();
 			db_conn.commit();
-			//log.d("insertion to aprp result: "+ Arrays.toString(res));
+			logger.log(Level.FINER,"insertion to aprps result: "+Arrays.toString(res));
 			return jresponse;
 		}
 	}
@@ -423,55 +414,8 @@ public class PhoneServer {
 		}
 
 		long rp_id=Long.parseLong((String) json.get(JsonKeys.rp_id.toString()));
-		double lat= json.has(JsonKeys.latitude.toString())? Double.parseDouble((String)json.get(JsonKeys.latitude.toString())):Double.NaN;
-		double lon= json.has(JsonKeys.longitude.toString())? Double.parseDouble((String)json.get(JsonKeys.longitude.toString())):Double.NaN;
-		short floor=json.has(JsonKeys.floor_number.toString())? Short.parseShort((String) json.get(JsonKeys.floor_number.toString())):0; //default value is 0
-		double accuracy= json.has(JsonKeys.accuracy.toString())?  Double.parseDouble((String) json.get(JsonKeys.accuracy.toString())):Double.NaN; //default value is NaN
 
-		
-		// UPDATE rps  SET name='test2',rp_type=1,latitude=11,longitude=12,accuracy=10,floor_number=null,creator_id=2,date_modified=CURRENT_TIMESTAMP,floor_id=2 WHERE rp_id=1;
-		JsonKeys[] args=new JsonKeys[] {JsonKeys.rp_name,JsonKeys.rp_type,JsonKeys.latitude,JsonKeys.longitude,JsonKeys.accuracy,JsonKeys.floor_number,JsonKeys.creator_id,JsonKeys.date_modified,JsonKeys.building_id};//"visit_count","no_aps"};
-		String query_begin ="UPDATE rps SET ";//name, rp_type,latitude, longitude, accuracy, floor_number, creator_id,date_modified,visit_count,no_aps)"
-		String query_end =  "date_modified=CURRENT_TIMESTAMP WHERE rp_id= "+rp_id;
-		ArrayList<Object> values=new ArrayList<>();
-		ArrayList<JsonKeysTypes> column_types=new ArrayList<>();
-		for(int i=0;i<args.length;i++)
-		{
-			if(json.has(args[i].toString()))
-			{
-				query_begin+=args[i].toString()+"= ?, ";
-				//query_end+="?, ";
-				column_types.add(args[i].getKeyType());
-				values.add(json.get(args[i].toString()));
-			}
-		}
-
-		//connecting to db if necessary
-		final int trials=3; //number of trials for connecting to db.
-		for(int i=0;i<trials;i++)
-		{
-			if(db_conn ==null || db_conn.isClosed())
-				connectDb();
-			else
-				break;
-		}
-		if(db_conn==null) //after trying it is still not connected
-			throw new SQLException("Could not connect to db after "+trials+" trials");
-
-		//doing the insertion and retrieving the id of inserted rp.
-		ResultSet rs = manipulate(query_begin+query_end,column_types,values);
-		if(rs==null)
-		{
-			jresponse.put(JsonKeys.response_type.toString(), ResponseType.error.toString());
-			jresponse.put(JsonKeys.error_code.toString(), ErrorCode.db_error.toString());
-			jresponse.put(JsonKeys.message.toString(), "The database did not return a valid RP_id after insertion. RP insertaion failed.");
-			return jresponse;
-		}
-		jresponse.put(JsonKeys.response_type.toString(), ResponseType.rp_updated.toString());
-		jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
-
-
-		logger.log(Level.INFO, " updated RP. processing wifi scans.");
+		logger.log(Level.INFO, " Processing wifi scans...");
 		//creating a new point in the DB.
 		//int ap_numbers = (Integer)json.get("ap_numbers");
 		JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
@@ -515,32 +459,61 @@ public class PhoneServer {
 		}
 		int[] res=preparedStmt_aps.executeBatch();
 		db_conn.commit();
-		//log.d("insertion to aps result: "+Arrays.toString(res));
+		logger.log(Level.FINER,"insertion to aps result: "+Arrays.toString(res));
+		logger.log(Level.INFO, "aps updated.");
+		
 		preparedStmt_aprps.executeBatch();
 		db_conn.commit();
-		//log.d("insertion to aprp result: "+ Arrays.toString(res));
+		logger.log(Level.FINER,"insertion to aprps result: "+Arrays.toString(res));
+		logger.log(Level.INFO, "aprp updated.");
+		db_conn.setAutoCommit(true);
+		
+		//counting the aps for the rp. This will make localization faster.
+		ResultSet tmp_rs=query("SELECT COUNT(*) FROM aprp WHERE rp_id = "+rp_id);
+		if(tmp_rs==null)
+			throw new SQLException("Could not communicate to db try again.");
+		tmp_rs.next();
+		int ap_count=tmp_rs.getInt(1);
+		json.put(JsonKeys.ap_count.toString(), ap_count+"");
+		// UPDATE rps  SET name='test2',rp_type=1,latitude=11,longitude=12,accuracy=10,floor_number=null,creator_id=2,date_modified=CURRENT_TIMESTAMP,floor_id=2 WHERE rp_id=1;
+		JsonKeys[] args=new JsonKeys[] {JsonKeys.rp_name,JsonKeys.rp_type,JsonKeys.latitude,JsonKeys.longitude,JsonKeys.accuracy,JsonKeys.floor_number,JsonKeys.creator_id,JsonKeys.date_modified,JsonKeys.building_id,JsonKeys.ap_count};//"visit_count","no_aps"};
+		String query_begin ="UPDATE rps SET ";//name, rp_type,latitude, longitude, accuracy, floor_number, creator_id,date_modified,visit_count,no_aps)"
+		String query_end =  "date_modified=CURRENT_TIMESTAMP WHERE rp_id= "+rp_id;
+		ArrayList<Object> values=new ArrayList<>();
+		ArrayList<JsonKeysTypes> column_types=new ArrayList<>();
+		for(int i=0;i<args.length;i++)
+		{
+			if(json.has(args[i].toString()))
+			{
+				query_begin+=args[i].toString()+"= ?, ";
+				//query_end+="?, ";
+				column_types.add(args[i].getKeyType());
+				values.add(json.get(args[i].toString()));
+			}
+		}
+
+		//doing the insertion and retrieving the id of inserted rp.
+		ResultSet rs = manipulate(query_begin+query_end,column_types,values);
+		if(rs==null)
+		{
+			jresponse.put(JsonKeys.response_type.toString(), ResponseType.error.toString());
+			jresponse.put(JsonKeys.error_code.toString(), ErrorCode.db_error.toString());
+			jresponse.put(JsonKeys.message.toString(), "The database did not return a valid RP_id after insertion. RP insertaion failed.");
+			return jresponse;
+		}
+		jresponse.put(JsonKeys.response_type.toString(), ResponseType.rp_updated.toString());
+		jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
+		
+		logger.log(Level.INFO, "rps updated. "+ap_count+" aps updated/added.");
 		return jresponse;
 
 	}
 
-	@SuppressWarnings("unchecked")
 	private JSONObject localize(JSONObject json) throws SQLException
 	{
 		logger.log(Level.INFO,"Localize entry...");
 		JSONObject jresponse=new JSONObject();		
 		//long user_mac= json.has(JsonKeys.local_mac.toString())? Long.parseLong((String)json.get(JsonKeys.local_mac.toString())):0;
-		
-		//connecting to db if necessary
-		final int trials=3; //number of trials for connecting to db.
-		for(int i=0;i<trials;i++)
-		{
-			if(db_conn ==null || db_conn.isClosed())
-				connectDb();
-			else
-				break;
-		}
-		if(db_conn==null) //after trying it is still not connected
-			throw new SQLException("Could not connect to db after "+trials+" trials");
 		
 		JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
 		String macs="";
@@ -560,22 +533,25 @@ public class PhoneServer {
 			macs+= mac+(i < aps.length()-1? ", ":"");
 		}
 		
-		//Old method without tie breaker.
-		/*String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, aprp.rp_id, COUNT(MAC) AS NumberOfAPs"+ 
+		//**************first method without tie breaker.
+		///////////////////////////////////////////////////////////
+		String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, rps.ap_count AS TotalAPs, aprp.rp_id, COUNT(MAC) AS NumberOfAPs"+ 
                      " FROM (aprp INNER JOIN rps ON aprp.rp_id = rps.rp_id)"+
                      " WHERE MAC IN ("+ macs+" )"+
                      " GROUP BY rp_id"+
-                     " ORDER BY NumberOfAPs DESC";
-        */
-		//new method with tie breaker
-		String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, aprp.rp_id, "+
+                     " ORDER BY NumberOfAPs DESC"+
+                     " LIMIT 5";
+		
+		//******new method with tie breaker
+		////////////////////////////////////////////////
+		/*String query_str="SELECT rps.latitude, rps.longitude, rps.floor_number, rps.building_id, aprp.rp_id, "+
 	                     " SUM(IF(MAC IN ("+macs+"), 1, 0)) AS NumberOfAPs, "+
 	                     "  count(MAC) AS TotalAPs "+
 	                     " FROM (aprp INNER JOIN rps ON aprp.rp_id = rps.rp_id) "+
 	                     " GROUP BY rp_id"+
 	                     " ORDER BY NumberOfAPs DESC, TotalAPs ASC"+
 	                     " LIMIT 5";
-		
+		*/
 		
 		ResultSet rs=query(query_str);
 		if(rs==null)
@@ -731,7 +707,7 @@ public class PhoneServer {
 	 */
 	private ResultSet manipulate(String query_str,ArrayList<JsonKeysTypes> column_types, ArrayList<Object> values)
 	{
-		//logger.log(Level.INFO,"calling a prepared statement. qurey_str: "+query_str);
+		logger.log(Level.FINER,"calling a prepared statement. qurey_str: "+query_str);
 		try
 		{
 			//" INSERT INTO log (echo_time, text,id)" + " values (?, ?, ?)";

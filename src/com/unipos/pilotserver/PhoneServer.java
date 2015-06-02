@@ -338,7 +338,7 @@ public class PhoneServer {
 			jresponse.put(JsonKeys.response_type.toString(), ResponseType.manual_rp_added.toString());
 			jresponse.put(JsonKeys.rp_id.toString(), rp_id+"");
 
-			logger.log(Level.INFO, "RP processed."+aps.length() +" APs added. processing wifi scans.");
+			logger.log(Level.INFO, "RP processed. "+aps.length() +" APs added. processing wifi scans.");
 			//creating a new point in the DB.
 			//int ap_numbers = (Integer)json.get("ap_numbers");
 			//JSONArray aps= (JSONArray) json.get(JsonKeys.aps.toString());
@@ -384,9 +384,11 @@ public class PhoneServer {
 			db_conn.commit();
 			logger.log(Level.FINER,"insertion to aps result: "+Arrays.toString(res));
 			logger.log(Level.INFO, "aps updated.");
+			preparedStmt_aps.close();
 			preparedStmt_aprps.executeBatch();
 			db_conn.commit();
 			logger.log(Level.FINER,"insertion to aprps result: "+Arrays.toString(res));
+			preparedStmt_aprps.close();
 			return jresponse;
 		}
 	}
@@ -461,13 +463,14 @@ public class PhoneServer {
 		db_conn.commit();
 		logger.log(Level.FINER,"insertion to aps result: "+Arrays.toString(res));
 		logger.log(Level.INFO, "aps updated.");
+		preparedStmt_aps.close();
 		
 		preparedStmt_aprps.executeBatch();
 		db_conn.commit();
 		logger.log(Level.FINER,"insertion to aprps result: "+Arrays.toString(res));
 		logger.log(Level.INFO, "aprp updated.");
 		db_conn.setAutoCommit(true);
-		
+		preparedStmt_aprps.close();
 		//counting the aps for the rp. This will make localization faster.
 		ResultSet tmp_rs=query("SELECT COUNT(*) FROM aprp WHERE rp_id = "+rp_id);
 		if(tmp_rs==null)
@@ -708,6 +711,7 @@ public class PhoneServer {
 	private ResultSet manipulate(String query_str,ArrayList<JsonKeysTypes> column_types, ArrayList<Object> values)
 	{
 		logger.log(Level.FINER,"calling a prepared statement. qurey_str: "+query_str);
+		PreparedStatement preparedStmt=null;
 		try
 		{
 			//" INSERT INTO log (echo_time, text,id)" + " values (?, ?, ?)";
@@ -716,7 +720,7 @@ public class PhoneServer {
 
 
 			// create the mysql insert preparedstatement
-			PreparedStatement preparedStmt = db_conn.prepareStatement(query,PreparedStatement.RETURN_GENERATED_KEYS);
+			preparedStmt = db_conn.prepareStatement(query,PreparedStatement.RETURN_GENERATED_KEYS);
 			for(int i=0;i<values.size();i++)
 			{
 				switch (column_types.get(i))
@@ -750,16 +754,16 @@ public class PhoneServer {
 			// execute the preparedstatement
 			//log.d("final prepared statement: "+ preparedStmt.toString());
 			preparedStmt.executeUpdate();
-			
-			return preparedStmt.getGeneratedKeys();
+			return preparedStmt.getGeneratedKeys(); 
 		}
 		catch(Exception e)
 		{
-			logger.log(Level.WARNING,"Writing to DB was not successful");
+			logger.log(Level.WARNING,"Writing to DB was not successful. Reason: "+e.getMessage());
 			//log.printStackTrace(e, Slog.Mode.DEBUG);
 			e.printStackTrace();
 			return null;
 		}
+		
 	}
 	
 	private void writeline(String msg) throws Exception

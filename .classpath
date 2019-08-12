@@ -4,5 +4,12 @@
 	<classpathentry kind="con" path="com.google.appengine.eclipse.core.GAE_CONTAINER"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="lib" path="war/WEB-INF/lib/json-20140107.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/commons-dbcp2-2.1-javadoc.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/commons-dbcp2-2.1.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/commons-pool2-2.4.1-javadoc.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/commons-pool2-2.4.1.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/commons-logging-1.2-javadoc.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/commons-logging-1.2.jar"/>
+	<classpathentry kind="lib" path="war/WEB-INF/lib/HikariCP-2.0.0.jar"/>
 	<classpathentry kind="output" path="war/WEB-INF/classes"/>
 </classpath>

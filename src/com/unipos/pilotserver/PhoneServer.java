@@ -646,8 +646,8 @@ public class PhoneServer {
 				url = "jdbc:mysql://173.194.247.241:3306";//?user=root";
 			}
 			
-			db_conn = DriverManager.getConnection(url,"shervin","123456");
-			ResultSet rs = db_conn.createStatement().executeQuery("use loc_db");
+			db_conn = DriverManager.getConnection(url+"/loc_db","shervin","123456");
+			//ResultSet rs = db_conn.createStatement().executeQuery("use loc_db");
 			logger.log(Level.INFO, "connected to db.");
 			return db_conn;
 		}
